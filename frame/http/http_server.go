@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"time"
 
@@ -55,6 +56,9 @@ func (server *HttpServer) Run() {
 	logger.Config(logConf, logger.InfoLevel, logger.ByDay, 2)
 
 	logger.Raw(BANNER)
+
+	sysType := runtime.GOOS
+	logger.Info("System: %s", sysType)
 
 	// init server
 	serverConf := util.ValueOrDefault((*config.GlobalConfig.Map)["server"], make(map[interface{}]interface{})).(map[interface{}]interface{})

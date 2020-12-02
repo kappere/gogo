@@ -27,7 +27,7 @@ func NewClient(redisConf map[interface{}]interface{}) {
 
 	_, err := Rdb.Ping(ctx).Result()
 	if err != nil {
-		panic("dddd")
+		panic(err.Error())
 	}
 }
 

@@ -14,7 +14,7 @@ type Task interface {
 var c = cron.New()
 
 func NewTask(cron string, t Task) {
-	c.AddFunc("0/10 * * * * *", func() {
+	c.AddFunc(cron, func() {
 		defer func() {
 			logger.Info("==== Task [%s] finished ====", reflect.TypeOf(t))
 		}()

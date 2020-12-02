@@ -72,7 +72,11 @@ func (l *LogFile) formatMsgHeader(calldepth int, prefix string) string {
 		file = "???"
 		line = 0
 	}
-	thread := "Thread-" + strconv.Itoa(util.GetCurrentThreadId())
+	tid := util.GetCurrentThreadId()
+	thread := "Thread-" + strconv.Itoa(tid)
+	if tid == -1 {
+		thread = ""
+	}
 	buf := []byte{}
 	l.formatHeader(&buf, prefix, now, file, line, thread)
 	return string(buf)
@@ -80,13 +84,13 @@ func (l *LogFile) formatMsgHeader(calldepth int, prefix string) string {
 
 func (l *LogFile) formatHeader(buf *[]byte, prefix string, t time.Time, file string, line int, thread string) {
 	*buf = append(*buf, prefix...)
-	year, month, day := t.Date()
-	itoa(buf, year, 4)
-	*buf = append(*buf, '-')
-	itoa(buf, int(month), 2)
-	*buf = append(*buf, '-')
-	itoa(buf, day, 2)
-	*buf = append(*buf, ' ')
+	// year, month, day := t.Date()
+	// itoa(buf, year, 4)
+	// *buf = append(*buf, '-')
+	// itoa(buf, int(month), 2)
+	// *buf = append(*buf, '-')
+	// itoa(buf, day, 2)
+	// *buf = append(*buf, ' ')
 	hour, min, sec := t.Clock()
 	itoa(buf, hour, 2)
 	*buf = append(*buf, ':')
@@ -96,9 +100,11 @@ func (l *LogFile) formatHeader(buf *[]byte, prefix string, t time.Time, file str
 	*buf = append(*buf, '.')
 	itoa(buf, t.Nanosecond()/1e3, 6)
 	*buf = append(*buf, ' ')
-	f := fmt.Sprintf("%50s:%d", file, line)
-	*buf = append(*buf, ("[" + f[len(f)-50:] + "]")...)
-	*buf = append(*buf, fmt.Sprintf(" [%-12s]", thread)...)
+	f := fmt.Sprintf("%30s:%d", file, line)
+	*buf = append(*buf, ("[" + f[len(f)-30:] + "]")...)
+	if thread != "" {
+		*buf = append(*buf, fmt.Sprintf(" [%-12s]", thread)...)
+	}
 	*buf = append(*buf, ": "...)
 }
 
