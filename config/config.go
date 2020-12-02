@@ -25,7 +25,7 @@ func (config *Config) readConfig() {
 	}
 	if (*t1)["external"] != nil && (*t1)["external"] != "" {
 		s, _ := (*t1)["external"].(string)
-		t3 := readConfigFile(s)
+		t3 := readExternalFile(s)
 		for k, v := range *t3 {
 			(*t1)[k] = v
 		}
@@ -37,6 +37,13 @@ func readConfigFile(path string) *map[string]interface{} {
 	file, _ := localAssets.Open(path)
 	data, _ := ioutil.ReadAll(file)
 	// data, _ := ioutil.ReadFile(path)
+	t := map[string]interface{}{}
+	_ = yaml.Unmarshal(data, &t)
+	return &t
+}
+
+func readExternalFile(path string) *map[string]interface{} {
+	data, _ := ioutil.ReadFile(path)
 	t := map[string]interface{}{}
 	_ = yaml.Unmarshal(data, &t)
 	return &t
