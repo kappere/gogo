@@ -1,10 +1,13 @@
 package context
 
 import (
+	"bytes"
 	"container/list"
+	"html/template"
 	"net/url"
 	"strings"
 
+	"wataru.com/gogo/config"
 	"wataru.com/gogo/frame/servlet"
 )
 
@@ -13,6 +16,14 @@ type Response struct {
 	Code    int         `json:"code"`
 	Success bool        `json:"success"`
 	Message string      `json:"message"`
+}
+
+type PageResponse struct {
+	buffer *bytes.Buffer
+}
+
+func (r *PageResponse) GetBuffer() *bytes.Buffer {
+	return r.buffer
 }
 
 type Context struct {
@@ -69,7 +80,7 @@ func (ps Params) ByName(name string) (va string) {
 	return
 }
 
-func (context *Context) Success(data interface{}) *Response {
+func (context *Context) Success(data interface{}) interface{} {
 	return &Response{
 		Data:    data,
 		Code:    0,
@@ -78,13 +89,26 @@ func (context *Context) Success(data interface{}) *Response {
 	}
 }
 
-func (context *Context) Error(message string) *Response {
+func (context *Context) Error(message string) interface{} {
 	return &Response{
 		Data:    nil,
 		Code:    -1,
 		Success: false,
 		Message: message,
 	}
+}
+
+func (context *Context) Render(templatePath string, data interface{}) interface{} {
+	templateFile := config.ReadFile("templates/" + templatePath)
+	tmpl, err := template.New("test").Parse(string(*templateFile))
+	if err != nil {
+		panic("Create template failed, err: " + err.Error())
+	}
+	resp := PageResponse{
+		buffer: bytes.NewBuffer([]byte{}),
+	}
+	tmpl.Execute(resp.buffer, data)
+	return &resp
 }
 
 /************************************/

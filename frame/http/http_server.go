@@ -21,13 +21,15 @@ import (
 
 const (
 	BANNER = `
-	▄▄ •        ▄▄ •       
-   ▐█ ▀ ▪▪     ▐█ ▀ ▪▪     
-   ▄█ ▀█▄ ▄█▀▄ ▄█ ▀█▄ ▄█▀▄ 
-   ▐█▄▪▐█▐█▌.▐▌▐█▄▪▐█▐█▌.▐▌
-   ·▀▀▀▀  ▀█▄▀▪·▀▀▀▀  ▀█▄▀▪
+     ______      ______    
+    / ____/___  / ____/___ 
+   / / __/ __ \/ / __/ __ \
+  / /_/ / /_/ / /_/ / /_/ /
+  \____/\____/\____/\____/ 
 
-                    GOGO v1.0.0`
+        GOGO v1.0.0
+
+`
 )
 
 type HttpServer struct {
@@ -49,21 +51,31 @@ func (server *HttpServer) doInitializer() {
 	}
 }
 
+func (server *HttpServer) logBanner() {
+	bannerFile := config.ReadFile("banner.txt")
+	bannerContent := BANNER
+	if bannerFile != nil {
+		bannerContent = string(*bannerFile)
+	}
+	logger.Raw(bannerContent)
+}
+
+// Run 运行http服务
 func (server *HttpServer) Run() {
 	startTime := time.Now().UnixNano()
-	// init logger
+	// 初始化logger
 	logConf := util.ValueOrDefault((*config.GlobalConfig.Map)["log"], make(map[interface{}]interface{})).(map[interface{}]interface{})
 	logger.Config(logConf, logger.InfoLevel, logger.ByDay, 2)
 
-	logger.Raw(BANNER)
+	// 打印banner
+	server.logBanner()
 
-	sysType := runtime.GOOS
-	logger.Info("System: %s", sysType)
+	// 打印os
+	logger.Info("System: %s", runtime.GOOS)
 
-	// init server
+	// 读取server配置
 	serverConf := util.ValueOrDefault((*config.GlobalConfig.Map)["server"], make(map[interface{}]interface{})).(map[interface{}]interface{})
 	logger.Info("Run in %s mode", config.GlobalConfig.Env)
-	// router.Handle("/hello/golang/", &BaseHander{})
 
 	// 初始化数据源连接
 	_, dbCancel := db.InitDb()
@@ -80,11 +92,11 @@ func (server *HttpServer) Run() {
 
 	// 初始化路由中间件
 	server.router.InitRouterMiddleware()
-	server.router.LogRouterSummary()
 
 	// 启动定时任务
 	task.StartTaskSchedule()
 
+	// 启动端口监听
 	port := util.ValueOrDefault(serverConf["port"], 8080).(int)
 	netSrv := &http.Server{
 		Addr:    ":" + strconv.Itoa(port),
