@@ -58,31 +58,29 @@ type LogFile struct {
 var logFile LogFile
 var logWritter io.Writer
 var logger *log.Logger
-var gormLogger *log.Logger
+var gormLogger *GormLogger
 var rawLogger *log.Logger
 
-func (l *LogFile) formatMsgHeader(calldepth int, prefix string) string {
+func (l *LogFile) formatMsgHeader(calldepth int, prefix string, codeLine string) string {
 	now := time.Now() // get this early.
 	var file string
-	var line int
 	// Release lock while getting caller info - it's expensive.
 	var ok bool
-	_, file, line, ok = runtime.Caller(calldepth)
-	if !ok {
+	var line int
+	if codeLine != "" {
+		file = codeLine
+	} else if _, file, line, ok = runtime.Caller(calldepth); ok {
+		file = file + ":" + strconv.Itoa(line)
+	} else {
 		file = "???"
-		line = 0
 	}
-	tid := util.GetCurrentThreadId()
-	thread := "Thread-" + strconv.Itoa(tid)
-	if tid == -1 {
-		thread = ""
-	}
+	goroutine := ""
 	buf := []byte{}
-	l.formatHeader(&buf, prefix, now, file, line, thread)
+	l.formatHeader(&buf, prefix, now, file, goroutine)
 	return string(buf)
 }
 
-func (l *LogFile) formatHeader(buf *[]byte, prefix string, t time.Time, file string, line int, thread string) {
+func (l *LogFile) formatHeader(buf *[]byte, prefix string, t time.Time, file string, goroutine string) {
 	*buf = append(*buf, prefix...)
 	// year, month, day := t.Date()
 	// itoa(buf, year, 4)
@@ -100,10 +98,10 @@ func (l *LogFile) formatHeader(buf *[]byte, prefix string, t time.Time, file str
 	*buf = append(*buf, '.')
 	itoa(buf, t.Nanosecond()/1e3, 6)
 	*buf = append(*buf, ' ')
-	f := fmt.Sprintf("%30s:%d", file, line)
+	f := fmt.Sprintf("%30s", file)
 	*buf = append(*buf, ("[" + f[len(f)-30:] + "]")...)
-	if thread != "" {
-		*buf = append(*buf, fmt.Sprintf(" [%-12s]", thread)...)
+	if goroutine != "" {
+		*buf = append(*buf, fmt.Sprintf(" [%-12s]", goroutine)...)
 	}
 	*buf = append(*buf, ": "...)
 }
@@ -127,35 +125,67 @@ func itoa(buf *[]byte, i int, wid int) {
 
 func Debug(format string, v ...interface{}) {
 	if logFile.level >= DebugLevel {
-		header := logFile.formatMsgHeader(2, plain(debugPrefix))
+		header := logFile.formatMsgHeader(2, plain(debugPrefix), "")
 		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v...)))
 	}
 }
 
 func Info(format string, v ...interface{}) {
 	if logFile.level >= InfoLevel {
-		header := logFile.formatMsgHeader(2, plain(infoPrefix))
+		header := logFile.formatMsgHeader(2, plain(infoPrefix), "")
 		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v...)))
 	}
 }
 
+func logSql(format string, v ...interface{}) {
+	if logFile.level >= InfoLevel {
+		codeLine, _ := v[1].(string)
+		params, _ := v[4].([]interface{})
+		var formatParams []interface{}
+		for _, item := range params {
+			if v1, ok1 := item.(*string); ok1 && v1 != nil {
+				formatParams = append(formatParams, *v1)
+			} else if v2, ok2 := item.(*int); ok2 && v2 != nil {
+				formatParams = append(formatParams, *v2)
+			} else if v3, ok3 := item.(*int64); ok3 && v3 != nil {
+				formatParams = append(formatParams, *v3)
+			} else {
+				formatParams = append(formatParams, item)
+			}
+		}
+		header := logFile.formatMsgHeader(2, plain(infoPrefix), codeLine)
+		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v[0], v[3], formatParams, v[2])))
+	}
+}
+
+type GormLogger struct {
+}
+
+// v[0] level
+// v[1] file
+// v[2] time
+// v[3] sql
+func (l *GormLogger) Print(v ...interface{}) {
+	logSql("[%s] %s %v %s", v...)
+}
+
 func Warn(format string, v ...interface{}) {
 	if logFile.level >= WarnLevel {
-		header := logFile.formatMsgHeader(2, plain(warnPrefix))
+		header := logFile.formatMsgHeader(2, plain(warnPrefix), "")
 		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v...)))
 	}
 }
 
 func Error(format string, v ...interface{}) {
 	if logFile.level >= ErrorLevel {
-		header := logFile.formatMsgHeader(2, plain(errorPrefix))
+		header := logFile.formatMsgHeader(2, plain(errorPrefix), "")
 		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v...)))
 	}
 }
 
 func Fatal(format string, v ...interface{}) {
 	if logFile.level >= FatalLevel {
-		header := logFile.formatMsgHeader(2, plain(fatalPrefix))
+		header := logFile.formatMsgHeader(2, plain(fatalPrefix), "")
 		_ = logger.Output(2, NewMessageString(header+fmt.Sprintf(format, v...)))
 	}
 }
@@ -229,7 +259,7 @@ func Config(logConf map[interface{}]interface{}, level int, saveMode int, saveDa
 	logFile.saveDays = saveDays
 	logWritter = io.MultiWriter(os.Stdout, logFile)
 	logger = log.New(logWritter, "", 0)
-	gormLogger = log.New(logWritter, "[GORM]  ", 0)
+	gormLogger = &GormLogger{}
 	rawLogger = log.New(logWritter, "", 0)
 }
 
@@ -245,7 +275,7 @@ func GetLogger() *log.Logger {
 	return logger
 }
 
-func GetGormLogger() *log.Logger {
+func GetGormLogger() *GormLogger {
 	return gormLogger
 }
 
