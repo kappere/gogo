@@ -523,3 +523,9 @@ func RegistInitializer(f func()) {
 		F: f,
 	})
 }
+
+func Inject(f func()) {
+	InitializerList.PushBack(Initializer{
+		F: f,
+	})
+}
