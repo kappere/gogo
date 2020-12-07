@@ -3,10 +3,17 @@ package context
 import (
 	"bytes"
 	"container/list"
+	"encoding/json"
+	"fmt"
 	"html/template"
+	"io"
+	"net/http"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
 
+	"github.com/go-playground/validator/v10"
 	"wataru.com/gogo/config"
 	"wataru.com/gogo/frame/servlet"
 )
@@ -78,6 +85,134 @@ func (ps Params) Get(name string) (string, bool) {
 func (ps Params) ByName(name string) (va string) {
 	va, _ = ps.Get(name)
 	return
+}
+
+var (
+	JSON = jsonBinding{}
+	// XML           = xmlBinding{}
+	// Form          = formBinding{}
+	// Query         = queryBinding{}
+	// FormPost      = formPostBinding{}
+	// FormMultipart = formMultipartBinding{}
+	// ProtoBuf      = protobufBinding{}
+	// MsgPack       = msgpackBinding{}
+	// YAML          = yamlBinding{}
+	// Uri           = uriBinding{}
+	// Header        = headerBinding{}
+)
+
+// Binding describes the interface which needs to be implemented for binding the
+// data present in the request such as JSON request body, query parameters or
+// the form POST.
+type Binding interface {
+	Name() string
+	Bind(*http.Request, interface{}) error
+}
+
+// BindingBody adds BindBody method to Binding. BindBody is similar with Bind,
+// but it reads the body from supplied bytes instead of req.Body.
+type BindingBody interface {
+	Binding
+	BindBody([]byte, interface{}) error
+}
+
+type jsonBinding struct{}
+
+func (jsonBinding) Name() string {
+	return "json"
+}
+
+func (jsonBinding) Bind(req *http.Request, obj interface{}) error {
+	if req == nil || req.Body == nil {
+		return fmt.Errorf("invalid request")
+	}
+	return decodeJSON(req.Body, obj)
+}
+
+func (jsonBinding) BindBody(body []byte, obj interface{}) error {
+	return decodeJSON(bytes.NewReader(body), obj)
+}
+
+// EnableDecoderUseNumber is used to call the UseNumber method on the JSON
+// Decoder instance. UseNumber causes the Decoder to unmarshal a number into an
+// interface{} as a Number instead of as a float64.
+var EnableDecoderUseNumber = false
+
+// EnableDecoderDisallowUnknownFields is used to call the DisallowUnknownFields method
+// on the JSON Decoder instance. DisallowUnknownFields causes the Decoder to
+// return an error when the destination is a struct and the input contains object
+// keys which do not match any non-ignored, exported fields in the destination.
+var EnableDecoderDisallowUnknownFields = false
+
+func decodeJSON(r io.Reader, obj interface{}) error {
+	decoder := json.NewDecoder(r)
+	if EnableDecoderUseNumber {
+		decoder.UseNumber()
+	}
+	if EnableDecoderDisallowUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
+	if err := decoder.Decode(obj); err != nil {
+		return err
+	}
+	return validate(obj)
+}
+
+type StructValidator interface {
+	// ValidateStruct can receive any kind of type and it should never panic, even if the configuration is not right.
+	// If the received type is not a struct, any validation should be skipped and nil must be returned.
+	// If the received type is a struct or pointer to a struct, the validation should be performed.
+	// If the struct is not valid or the validation itself fails, a descriptive error should be returned.
+	// Otherwise nil must be returned.
+	ValidateStruct(interface{}) error
+
+	// Engine returns the underlying validator engine which powers the
+	// StructValidator implementation.
+	Engine() interface{}
+}
+
+type defaultValidator struct {
+	once     sync.Once
+	validate *validator.Validate
+}
+
+var _ StructValidator = &defaultValidator{}
+
+// ValidateStruct receives any kind of type, but only performed struct or pointer to struct type.
+func (v *defaultValidator) ValidateStruct(obj interface{}) error {
+	value := reflect.ValueOf(obj)
+	valueType := value.Kind()
+	if valueType == reflect.Ptr {
+		valueType = value.Elem().Kind()
+	}
+	if valueType == reflect.Struct {
+		v.lazyinit()
+		if err := v.validate.Struct(obj); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (v *defaultValidator) Engine() interface{} {
+	v.lazyinit()
+	return v.validate
+}
+
+func (v *defaultValidator) lazyinit() {
+	v.once.Do(func() {
+		v.validate = validator.New()
+		v.validate.SetTagName("binding")
+	})
+}
+
+var Validator StructValidator = &defaultValidator{}
+
+func validate(obj interface{}) error {
+	if Validator == nil {
+		return nil
+	}
+	return Validator.ValidateStruct(obj)
 }
 
 func (context *Context) Success(data interface{}) interface{} {
@@ -344,10 +479,10 @@ func (c *Context) get(m map[string][]string, key string) (map[string]string, boo
 // 	return c.MustBindWith(obj, b)
 // }
 
-// // BindJSON is a shortcut for c.MustBindWith(obj, binding.JSON).
-// func (c *Context) BindJSON(obj interface{}) error {
-// 	return c.MustBindWith(obj, binding.JSON)
-// }
+// BindJSON is a shortcut for c.MustBindWith(obj, binding.JSON).
+func (c *Context) BindJSON(obj interface{}) error {
+	return c.MustBindWith(obj, JSON)
+}
 
 // // BindXML is a shortcut for c.MustBindWith(obj, binding.BindXML).
 // func (c *Context) BindXML(obj interface{}) error {
@@ -379,16 +514,15 @@ func (c *Context) get(m map[string][]string, key string) (map[string]string, boo
 // 	return nil
 // }
 
-// // MustBindWith binds the passed struct pointer using the specified binding engine.
-// // It will abort the request with HTTP 400 if any error occurs.
-// // See the binding package.
-// func (c *Context) MustBindWith(obj interface{}, b binding.Binding) error {
-// 	if err := c.ShouldBindWith(obj, b); err != nil {
-// 		c.AbortWithError(http.StatusBadRequest, err).SetType(ErrorTypeBind) // nolint: errcheck
-// 		return err
-// 	}
-// 	return nil
-// }
+// MustBindWith binds the passed struct pointer using the specified binding engine.
+// It will abort the request with HTTP 400 if any error occurs.
+// See the binding package.
+func (c *Context) MustBindWith(obj interface{}, b Binding) error {
+	if err := c.ShouldBindWith(obj, b); err != nil {
+		panic(err)
+	}
+	return nil
+}
 
 // // ShouldBind checks the Content-Type to select a binding engine automatically,
 // // Depending the "Content-Type" header different bindings are used:
@@ -437,11 +571,11 @@ func (c *Context) get(m map[string][]string, key string) (map[string]string, boo
 // 	return binding.Uri.BindUri(m, obj)
 // }
 
-// // ShouldBindWith binds the passed struct pointer using the specified binding engine.
-// // See the binding package.
-// func (c *Context) ShouldBindWith(obj interface{}, b binding.Binding) error {
-// 	return b.Bind(c.Request, obj)
-// }
+// ShouldBindWith binds the passed struct pointer using the specified binding engine.
+// See the binding package.
+func (c *Context) ShouldBindWith(obj interface{}, b Binding) error {
+	return b.Bind(c.HttpRequest.Request, obj)
+}
 
 // // ShouldBindBodyWith is similar with ShouldBindWith, but it stores the request
 // // body into the context, and reuse when it is called again.

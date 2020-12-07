@@ -160,6 +160,7 @@ func (router *Router) invokeTargetControllerMethod(c *context.Context, handlerFu
 			} else {
 				msg = "服务器异常，请联系管理员"
 			}
+			logger.Info("%v", r)
 			logger.Error("Web exception for error: %s", msg)
 			err = errors.New(msg)
 		}
