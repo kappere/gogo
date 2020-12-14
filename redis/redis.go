@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/go-redis/redis/v8"
+	"wataru.com/gogo/config"
 	"wataru.com/gogo/logger"
 	"wataru.com/gogo/util"
 )
@@ -13,7 +14,14 @@ import (
 var ctx = context.Background()
 var Rdb *redis.Client
 
-func NewClient(redisConf map[interface{}]interface{}) {
+func InitRedis() {
+	redisConf := util.ValueOrDefault((*config.GlobalConfig.Map)["redis"], make(map[interface{}]interface{})).(map[interface{}]interface{})
+	if len(redisConf) > 0 {
+		newClient(redisConf)
+	}
+}
+
+func newClient(redisConf map[interface{}]interface{}) {
 	host := util.ValueOrDefault(redisConf["host"], "localhost").(string)
 	port := util.ValueOrDefault(redisConf["port"], "3306").(int)
 	password := util.ValueOrDefault(redisConf["password"], "").(string)

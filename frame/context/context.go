@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
-	"net/http"
+	"net"
 	"net/url"
 	"reflect"
 	"strings"
@@ -16,6 +16,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"wataru.com/gogo/config"
 	"wataru.com/gogo/frame/servlet"
+	"wataru.com/gogo/frame/session"
 )
 
 type Response struct {
@@ -44,6 +45,7 @@ type Context struct {
 	// formCache use url.ParseQuery cached PostForm contains the parsed form data from POST, PATCH,
 	// or PUT body parameters.
 	formCache url.Values
+	Session   *session.Session
 }
 
 type LocalVars struct {
@@ -106,7 +108,7 @@ var (
 // the form POST.
 type Binding interface {
 	Name() string
-	Bind(*http.Request, interface{}) error
+	Bind(*servlet.HttpRequest, interface{}) error
 }
 
 // BindingBody adds BindBody method to Binding. BindBody is similar with Bind,
@@ -122,7 +124,7 @@ func (jsonBinding) Name() string {
 	return "json"
 }
 
-func (jsonBinding) Bind(req *http.Request, obj interface{}) error {
+func (jsonBinding) Bind(req *servlet.HttpRequest, obj interface{}) error {
 	if req == nil || req.Body == nil {
 		return fmt.Errorf("invalid request")
 	}
@@ -237,7 +239,7 @@ func (context *Context) Render(templatePath string, data interface{}) interface{
 	templateFile := config.ReadFile("templates/" + templatePath)
 	tmpl, err := template.New("test").Parse(string(*templateFile))
 	if err != nil {
-		panic("Create template failed, err: " + err.Error())
+		panic("create template failed, err: " + err.Error())
 	}
 	resp := PageResponse{
 		buffer: bytes.NewBuffer([]byte{}),
@@ -311,7 +313,7 @@ func (c *Context) QueryArray(key string) []string {
 
 func (c *Context) getQueryCache() {
 	if c.queryCache == nil {
-		c.queryCache = c.HttpRequest.Request.URL.Query()
+		c.queryCache = c.HttpRequest.URL.Query()
 	}
 }
 
@@ -574,7 +576,7 @@ func (c *Context) MustBindWith(obj interface{}, b Binding) error {
 // ShouldBindWith binds the passed struct pointer using the specified binding engine.
 // See the binding package.
 func (c *Context) ShouldBindWith(obj interface{}, b Binding) error {
-	return b.Bind(c.HttpRequest.Request, obj)
+	return b.Bind(c.HttpRequest, obj)
 }
 
 // // ShouldBindBodyWith is similar with ShouldBindWith, but it stores the request
@@ -599,33 +601,20 @@ func (c *Context) ShouldBindWith(obj interface{}, b Binding) error {
 // 	return bb.BindBody(body, obj)
 // }
 
-// // ClientIP implements a best effort algorithm to return the real client IP, it parses
-// // X-Real-IP and X-Forwarded-For in order to work properly with reverse-proxies such us: nginx or haproxy.
-// // Use X-Forwarded-For before X-Real-Ip as nginx uses X-Real-Ip with the proxy's IP.
-// func (c *Context) ClientIP() string {
-// 	if c.engine.ForwardedByClientIP {
-// 		clientIP := c.requestHeader("X-Forwarded-For")
-// 		clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
-// 		if clientIP == "" {
-// 			clientIP = strings.TrimSpace(c.requestHeader("X-Real-Ip"))
-// 		}
-// 		if clientIP != "" {
-// 			return clientIP
-// 		}
-// 	}
-
-// 	if c.engine.AppEngine {
-// 		if addr := c.requestHeader("X-Appengine-Remote-Addr"); addr != "" {
-// 			return addr
-// 		}
-// 	}
-
-// 	if ip, _, err := net.SplitHostPort(strings.TrimSpace(c.Request.RemoteAddr)); err == nil {
-// 		return ip
-// 	}
-
-// 	return ""
-// }
+// ClientIP 获取客户端IP
+func (c *Context) ClientIP() string {
+	clientIP := c.HttpRequest.Header.Get("X-Forwarded-For")
+	clientIP = strings.TrimSpace(strings.Split(clientIP, ",")[0])
+	if clientIP == "" {
+		clientIP = strings.TrimSpace(c.HttpRequest.Header.Get("X-Real-Ip"))
+	}
+	if clientIP == "" {
+		if ip, _, err := net.SplitHostPort(strings.TrimSpace(c.HttpRequest.RemoteAddr)); err == nil {
+			clientIP = ip
+		}
+	}
+	return clientIP
+}
 
 // // ContentType returns the Content-Type header of the request.
 // func (c *Context) ContentType() string {

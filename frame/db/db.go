@@ -13,6 +13,9 @@ var Db *gorm.DB
 
 func InitDb() (*gorm.DB, func()) {
 	dbConf := util.ValueOrDefault((*config.GlobalConfig.Map)["database"], make(map[interface{}]interface{})).(map[interface{}]interface{})
+	if len(dbConf) <= 0 {
+		return nil, func() {}
+	}
 	dbtype := util.ValueOrDefault(dbConf["dbtype"], "").(string)
 	url := util.ValueOrDefault(dbConf["url"], "").(string)
 	_db, err := gorm.Open(dbtype, url)

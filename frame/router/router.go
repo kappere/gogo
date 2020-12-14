@@ -202,7 +202,7 @@ func (router *Router) logRouterSummary() {
 			middlewareNames[t] = mw.Name()
 			t++
 		}
-		logger.Raw("%8sMapping [%3s] [%-20s] => [%-40s] middlewares:%s", "", v.httpMethodType, k, v.targetName, middlewareNames)
+		logger.Raw("%8sMapping [%-4s] [%-20s] => [%-40s] middlewares:%s", "", v.httpMethodType, k, v.targetName, middlewareNames)
 	}
 }
 

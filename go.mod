@@ -3,6 +3,7 @@ module wataru.com/gogo
 go 1.15
 
 require (
+	github.com/go-playground/validator/v10 v10.4.1
 	github.com/go-redis/redis/v8 v8.4.0
 	github.com/google/uuid v1.1.2
 	github.com/jessevdk/go-assets v0.0.0-20160921144138-4f4301a06e15

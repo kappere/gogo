@@ -12,8 +12,9 @@ import (
 var resourcesPath = "resources/"
 
 type Config struct {
-	Env string
-	Map *map[string]interface{}
+	Env      string
+	External string
+	Map      *map[string]interface{}
 }
 
 var GlobalConfig *Config = new(Config)
@@ -23,6 +24,9 @@ func (config *Config) readConfig() {
 	t2 := readConfigFile("config-" + config.Env + ".yml")
 	for k, v := range *t2 {
 		(*t1)[k] = v
+	}
+	if config.External != "" {
+		(*t1)["external"] = config.External
 	}
 	if (*t1)["external"] != nil && (*t1)["external"] != "" {
 		s, _ := (*t1)["external"].(string)
@@ -35,27 +39,31 @@ func (config *Config) readConfig() {
 }
 
 func readConfigFile(path string) *map[string]interface{} {
-	data := *ReadFile(path)
+	data := ReadFile(path)
 	t := map[string]interface{}{}
-	_ = yaml.Unmarshal(data, &t)
+	_ = yaml.Unmarshal(*data, &t)
 	return &t
 }
 
 func ReadFile(path string) *[]byte {
-	if pathExists("./" + resourcesPath + path) {
-		data, err := ioutil.ReadFile("./" + resourcesPath + path)
-		if err != nil {
-			return nil
+	if pathExists(path) {
+		// 外部路径
+		if data, err := ioutil.ReadFile(path); err == nil {
+			return &data
 		}
-		return &data
+	} else if pathExists("./" + resourcesPath + path) {
+		// 项目资源路径
+		if data, err := ioutil.ReadFile("./" + resourcesPath + path); err == nil {
+			return &data
+		}
 	} else {
-		file, err := localAssets.Open("/" + resourcesPath + path)
-		if err != nil {
-			return nil
+		// 可执行文件资源路径
+		if file, err := localAssets.Open("/" + resourcesPath + path); err == nil {
+			data, _ := ioutil.ReadAll(file)
+			return &data
 		}
-		data, _ := ioutil.ReadAll(file)
-		return &data
 	}
+	return nil
 }
 
 func pathExists(path string) bool {
@@ -83,8 +91,10 @@ func SetAssets(a *assets.FileSystem) {
 
 func InitConfig() {
 	// s.port = flag.String("port", "", "port")
-	env := flag.String("env", "dev", "环境")
+	env := flag.String("env", "dev", "运行环境")
+	external := flag.String("external", "", "外部配置文件")
 	flag.Parse()
 	GlobalConfig.Env = *env
+	GlobalConfig.External = *external
 	GlobalConfig.readConfig()
 }

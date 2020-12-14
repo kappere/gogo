@@ -1,21 +1,23 @@
 package servlet
 
-import "net/http"
+import (
+	"net/http"
+)
 
 type HttpRequest struct {
-	Request *http.Request
+	*http.Request
 }
 
 func (httpRequest *HttpRequest) Uri() string {
-	return httpRequest.Request.URL.Path
+	return httpRequest.URL.Path
 }
 
 func (httpRequest *HttpRequest) FullUri() string {
-	return httpRequest.Request.RequestURI
+	return httpRequest.RequestURI
 }
 
 func NewHttpRequest(request *http.Request) *HttpRequest {
 	return &HttpRequest{
-		Request: request,
+		request,
 	}
 }

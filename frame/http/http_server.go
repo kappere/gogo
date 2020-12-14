@@ -82,10 +82,7 @@ func (server *HttpServer) Run() {
 	defer dbCancel()
 
 	// 初始化Redis
-	redisConf := util.ValueOrDefault((*config.GlobalConfig.Map)["redis"], make(map[interface{}]interface{})).(map[interface{}]interface{})
-	if len(redisConf) > 0 {
-		redis.NewClient(redisConf)
-	}
+	redis.InitRedis()
 
 	// 初始化初始化器
 	server.doInitializer()
