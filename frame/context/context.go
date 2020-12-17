@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"reflect"
 	"strings"
@@ -15,8 +16,10 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"wataru.com/gogo/config"
+	"wataru.com/gogo/frame/component"
 	"wataru.com/gogo/frame/servlet"
 	"wataru.com/gogo/frame/session"
+	"wataru.com/gogo/logger"
 )
 
 type Response struct {
@@ -244,7 +247,10 @@ func (context *Context) Render(templatePath string, data interface{}) interface{
 	resp := PageResponse{
 		buffer: bytes.NewBuffer([]byte{}),
 	}
-	tmpl.Execute(resp.buffer, data)
+	err = tmpl.Execute(resp.buffer, data)
+	if err != nil {
+		panic(err)
+	}
 	return &resp
 }
 
@@ -340,12 +346,12 @@ func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
 	return c.get(c.queryCache, key)
 }
 
-// // PostForm returns the specified key from a POST urlencoded form or multipart form
-// // when it exists, otherwise it returns an empty string `("")`.
-// func (c *Context) PostForm(key string) string {
-// 	value, _ := c.GetPostForm(key)
-// 	return value
-// }
+// PostForm returns the specified key from a POST urlencoded form or multipart form
+// when it exists, otherwise it returns an empty string `("")`.
+func (c *Context) PostForm(key string) string {
+	value, _ := c.GetPostForm(key)
+	return value
+}
 
 // // DefaultPostForm returns the specified key from a POST urlencoded form or multipart form
 // // when it exists, otherwise it returns the specified defaultValue string.
@@ -357,19 +363,19 @@ func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
 // 	return defaultValue
 // }
 
-// // GetPostForm is like PostForm(key). It returns the specified key from a POST urlencoded
-// // form or multipart form when it exists `(value, true)` (even when the value is an empty string),
-// // otherwise it returns ("", false).
-// // For example, during a PATCH request to update the user's email:
-// //     email=mail@example.com  -->  ("mail@example.com", true) := GetPostForm("email") // set email to "mail@example.com"
-// // 	   email=                  -->  ("", true) := GetPostForm("email") // set email to ""
-// //                             -->  ("", false) := GetPostForm("email") // do nothing with email
-// func (c *Context) GetPostForm(key string) (string, bool) {
-// 	if values, ok := c.GetPostFormArray(key); ok {
-// 		return values[0], ok
-// 	}
-// 	return "", false
-// }
+// GetPostForm is like PostForm(key). It returns the specified key from a POST urlencoded
+// form or multipart form when it exists `(value, true)` (even when the value is an empty string),
+// otherwise it returns ("", false).
+// For example, during a PATCH request to update the user's email:
+//     email=mail@example.com  -->  ("mail@example.com", true) := GetPostForm("email") // set email to "mail@example.com"
+// 	   email=                  -->  ("", true) := GetPostForm("email") // set email to ""
+//                             -->  ("", false) := GetPostForm("email") // do nothing with email
+func (c *Context) GetPostForm(key string) (string, bool) {
+	if values, ok := c.GetPostFormArray(key); ok {
+		return values[0], ok
+	}
+	return "", false
+}
 
 // // PostFormArray returns a slice of strings for a given form key.
 // // The length of the slice depends on the number of params with the given key.
@@ -378,28 +384,30 @@ func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
 // 	return values
 // }
 
-// func (c *Context) getFormCache() {
-// 	if c.formCache == nil {
-// 		c.formCache = make(url.Values)
-// 		req := c.Request
-// 		if err := req.ParseMultipartForm(c.engine.MaxMultipartMemory); err != nil {
-// 			if err != http.ErrNotMultipart {
-// 				debugPrint("error on parse multipart form array: %v", err)
-// 			}
-// 		}
-// 		c.formCache = req.PostForm
-// 	}
-// }
+var MaxMultipartMemory int64 = 1024000
 
-// // GetPostFormArray returns a slice of strings for a given form key, plus
-// // a boolean value whether at least one value exists for the given key.
-// func (c *Context) GetPostFormArray(key string) ([]string, bool) {
-// 	c.getFormCache()
-// 	if values := c.formCache[key]; len(values) > 0 {
-// 		return values, true
-// 	}
-// 	return []string{}, false
-// }
+func (c *Context) getFormCache() {
+	if c.formCache == nil {
+		c.formCache = make(url.Values)
+		req := c.HttpRequest
+		if err := req.ParseMultipartForm(MaxMultipartMemory); err != nil {
+			if err != http.ErrNotMultipart {
+				logger.Error("error on parse multipart form array: %v", err)
+			}
+		}
+		c.formCache = req.PostForm
+	}
+}
+
+// GetPostFormArray returns a slice of strings for a given form key, plus
+// a boolean value whether at least one value exists for the given key.
+func (c *Context) GetPostFormArray(key string) ([]string, bool) {
+	c.getFormCache()
+	if values := c.formCache[key]; len(values) > 0 {
+		return values, true
+	}
+	return []string{}, false
+}
 
 // // PostFormMap returns a map for a given form key.
 // func (c *Context) PostFormMap(key string) map[string]string {
@@ -642,13 +650,75 @@ type Initializer struct {
 var InitializerList = list.New()
 
 func RegistInitializer(f func()) {
-	InitializerList.PushBack(Initializer{
+	InitializerList.PushBack(&Initializer{
 		F: f,
 	})
 }
 
 func Inject(f func()) {
-	InitializerList.PushBack(Initializer{
+	InitializerList.PushBack(&Initializer{
 		F: f,
+	})
+}
+
+func RegistRouterInitializer(f func()) {
+	InitializerList.PushBack(&Initializer{
+		F: f,
+	})
+}
+
+var beanMap = map[string]interface{}{}
+
+func RegistBean(v interface{}) {
+	refType := reflect.TypeOf(v).Elem()
+	typeName := formatBeanTypeName(refType)
+	if beanMap[typeName] != nil {
+		panic("Bean type of " + refType.String() + " alrealy exists!")
+	}
+	beanMap[typeName] = v
+}
+
+func formatBeanTypeName(refType reflect.Type) string {
+	return refType.PkgPath() + "/" + refType.Name()
+}
+
+func doInject() {
+	for _, bean := range beanMap {
+		refType := reflect.TypeOf(bean).Elem()
+		beanValue := reflect.ValueOf(bean).Elem()
+		for i := 0; i < refType.NumField(); i++ {
+			field := refType.Field(i)
+			fieldValue := beanValue.Field(i)
+			_, exist := field.Tag.Lookup("autowired")
+			if exist {
+				item := beanMap[formatBeanTypeName(field.Type.Elem())]
+				if item == nil {
+					panic("Bean type of " + field.Type.String() + " does not exists!")
+				}
+				fieldValue.Set(reflect.ValueOf(item))
+				// *(*interface{})(unsafe.Pointer(fieldValue.Addr().Pointer())) = item
+			}
+		}
+	}
+}
+
+func doInitialize() {
+	for _, bean := range beanMap {
+		bean.(component.Bean).Initialize()
+	}
+}
+
+func GetBean(name string) interface{} {
+	return beanMap[name]
+}
+
+func init() {
+	RegistInitializer(func() {
+		RegistBean(&component.Component{})
+		RegistBean(component.NewBaseDao())
+		RegistBean(component.NewBaseService())
+		RegistBean(component.NewBaseController())
+		doInject()
+		doInitialize()
 	})
 }

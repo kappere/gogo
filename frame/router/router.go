@@ -28,7 +28,8 @@ const (
 )
 
 type HandlerFunc struct {
-	target         reflect.Value
+	target         *reflect.Value
+	targetMethod   func(*context.Context) interface{}
 	targetName     string
 	httpMethodType HttpMethodType
 	middlewares    *list.List // 细粒度全局中间件
@@ -125,11 +126,56 @@ func (router *Router) renderResponse(resp http.ResponseWriter, result interface{
 	if _, ok := result.(*context.Response); ok {
 		resp.Header().Set("Content-Type", "application/json; charset=utf-8")
 		resp.WriteHeader(http.StatusOK)
-		resp.Write([]byte(json.ToJsonByte(result)))
+		resp.Write(json.ToJsonByte(result))
 	} else if v, ok := result.(*context.PageResponse); ok {
 		resp.Header().Set("Content-Type", "text/html; charset=utf-8")
 		resp.WriteHeader(http.StatusOK)
 		resp.Write(v.GetBuffer().Bytes())
+	}
+}
+
+func (router *Router) invokeTargetControllerMethod(c *context.Context, handlerFunc *HandlerFunc) (result interface{}, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			var msg string
+			_, e := r.(*panics.BizPanic)
+			if e {
+				msg = fmt.Sprintf("%s", r)
+			} else {
+				msg = "服务器异常，请联系管理员"
+			}
+			logger.Error("%v", r)
+			logger.Error("Web exception for error: %s", msg)
+			err = errors.New(msg)
+		}
+	}()
+	// method := *handlerFunc.target
+	// args := []reflect.Value{reflect.ValueOf(c)}
+	// result = method.Call(args)[0].Interface()
+	method := handlerFunc.targetMethod
+	result = method(c)
+	return result, nil
+}
+
+func (router *Router) Handle(pattern string, hl http.Handler) {
+	router.handlers[pattern] = hl
+}
+
+func (router *Router) HandleFunc(
+	httpMethodType HttpMethodType,
+	pattern string,
+	fn func(c *context.Context) interface{},
+	groups *list.List) {
+	// fnName := getFunctionName(fn, '/', '.')
+	// target := reflect.ValueOf(controller).MethodByName(fnName)
+	targetName := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
+	router.handleFuncs[pattern] = &HandlerFunc{
+		target:         nil,
+		targetMethod:   fn,
+		targetName:     targetName,
+		httpMethodType: httpMethodType,
+		middlewares:    nil,
+		groups:         groups,
 	}
 }
 
@@ -150,49 +196,6 @@ func getFunctionName(i interface{}, seps ...rune) string {
 	return ""
 }
 
-func (router *Router) invokeTargetControllerMethod(c *context.Context, handlerFunc *HandlerFunc) (result interface{}, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			var msg string
-			_, e := r.(*panics.BizPanic)
-			if e {
-				msg = fmt.Sprintf("%s", r)
-			} else {
-				msg = "服务器异常，请联系管理员"
-			}
-			logger.Info("%v", r)
-			logger.Error("Web exception for error: %s", msg)
-			err = errors.New(msg)
-		}
-	}()
-	method := handlerFunc.target
-	args := []reflect.Value{reflect.ValueOf(c)}
-	result = method.Call(args)[0].Interface()
-	return result, nil
-}
-
-func (router *Router) Handle(pattern string, hl http.Handler) {
-	router.handlers[pattern] = hl
-}
-
-func (router *Router) HandleFunc(
-	httpMethodType HttpMethodType,
-	pattern string,
-	controller interface{},
-	fn func(c *context.Context) interface{},
-	groups *list.List) {
-	fnName := getFunctionName(fn, '/', '.')
-	method := reflect.ValueOf(controller).MethodByName(fnName)
-	targetName := runtime.FuncForPC(reflect.ValueOf(fn).Pointer()).Name()
-	router.handleFuncs[pattern] = &HandlerFunc{
-		target:         method,
-		targetName:     targetName,
-		httpMethodType: httpMethodType,
-		middlewares:    nil,
-		groups:         groups,
-	}
-}
-
 func (router *Router) logRouterSummary() {
 	for k, v := range router.handleFuncs {
 		middlewareNames := make([]string, v.middlewares.Len())
@@ -210,24 +213,24 @@ func (router *Router) Middleware(mw middleware.Middleware) {
 	router.middlewares.PushBack(mw)
 }
 
-func (router *Router) Method(httpMethodType HttpMethodType, path string, controller interface{}, controllerFunc func(c *context.Context) interface{}) {
+func (router *Router) Method(httpMethodType HttpMethodType, path string, controllerFunc func(c *context.Context) interface{}) {
 	// Handle("/hello/golang/", &BaseHander{})
-	router.HandleFunc(httpMethodType, path, controller, controllerFunc, nil)
+	router.HandleFunc(httpMethodType, path, controllerFunc, nil)
 }
 
 // All 不限制HTTP方法路由注册
 func (router *Router) All(path string, controller *interface{}, controllerFunc func(c *context.Context) interface{}) {
-	router.Method(ALL, path, controller, controllerFunc)
+	router.Method(ALL, path, controllerFunc)
 }
 
 // Get HTTPGET路由注册
 func (router *Router) Get(path string, controller *interface{}, controllerFunc func(c *context.Context) interface{}) {
-	router.Method(GET, path, controller, controllerFunc)
+	router.Method(GET, path, controllerFunc)
 }
 
 // Post HTTPGET路由注册
 func (router *Router) Post(path string, controller *interface{}, controllerFunc func(c *context.Context) interface{}) {
-	router.Method(POST, path, controller, controllerFunc)
+	router.Method(POST, path, controllerFunc)
 }
 
 // Group 分组路由注册
@@ -263,20 +266,20 @@ func (group *RouterGroup) Middleware(mw middleware.Middleware) {
 	group.middlewares.PushBack(mw)
 }
 
-func (group *RouterGroup) Method(httpMethodType HttpMethodType, path string, controller interface{}, controllerFunc func(c *context.Context) interface{}) {
-	group.router.HandleFunc(httpMethodType, concatRouterPath(group.path, path), controller, controllerFunc, group.accessors)
+func (group *RouterGroup) Method(httpMethodType HttpMethodType, path string, controllerFunc func(c *context.Context) interface{}) {
+	group.router.HandleFunc(httpMethodType, concatRouterPath(group.path, path), controllerFunc, group.accessors)
 }
 
-func (group *RouterGroup) All(path string, controller interface{}, controllerFunc func(c *context.Context) interface{}) {
-	group.Method(ALL, path, controller, controllerFunc)
+func (group *RouterGroup) All(path string, controllerFunc func(c *context.Context) interface{}) {
+	group.Method(ALL, path, controllerFunc)
 }
 
-func (group *RouterGroup) Get(path string, controller interface{}, controllerFunc func(c *context.Context) interface{}) {
-	group.Method(GET, path, controller, controllerFunc)
+func (group *RouterGroup) Get(path string, controllerFunc func(c *context.Context) interface{}) {
+	group.Method(GET, path, controllerFunc)
 }
 
-func (group *RouterGroup) Post(path string, controller interface{}, controllerFunc func(c *context.Context) interface{}) {
-	group.Method(POST, path, controller, controllerFunc)
+func (group *RouterGroup) Post(path string, controllerFunc func(c *context.Context) interface{}) {
+	group.Method(POST, path, controllerFunc)
 }
 
 func NewRouter() *Router {

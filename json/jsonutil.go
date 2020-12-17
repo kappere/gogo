@@ -17,3 +17,11 @@ func ToJsonByte(data interface{}) []byte {
 	}
 	return jsons
 }
+
+func FromJson(data string, target interface{}) {
+	FromJsonByte([]byte(data), target)
+}
+
+func FromJsonByte(data []byte, target interface{}) {
+	json.Unmarshal([]byte(data), target)
+}

@@ -46,7 +46,7 @@ func (server *HttpServer) CreateRouter() {
 
 func (server *HttpServer) doInitializer() {
 	for i := httpcontext.InitializerList.Front(); i != nil; i = i.Next() {
-		br := i.Value.(httpcontext.Initializer)
+		br := i.Value.(*httpcontext.Initializer)
 		br.F()
 	}
 }

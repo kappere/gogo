@@ -23,6 +23,16 @@ func NewTask(cron string, t Task) {
 	})
 }
 
+func Tasklet(cron string, t func()) {
+	c.AddFunc(cron, func() {
+		defer func() {
+			logger.Info("==== Task [%s] finished ====", reflect.TypeOf(t))
+		}()
+		logger.Info("==== Task [%s] start ====", reflect.TypeOf(t))
+		t()
+	})
+}
+
 func StartTaskSchedule() {
 	c.Start()
 }

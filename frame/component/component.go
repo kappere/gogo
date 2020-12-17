@@ -19,16 +19,16 @@ type Component struct {
 }
 
 type Dao struct {
-	Component
+	*Component
 	Db *gorm.DB
 }
 
 type Controller struct {
-	Component
+	*Component
 }
 
 type Service struct {
-	Component
+	*Component
 	Db *gorm.DB
 }
 
@@ -58,6 +58,12 @@ func (s *Component) Initialize() {
 }
 
 func (s *Component) Destroy() {
+}
+
+func NewBaseDao() *Dao {
+	return &Dao{
+		Db: db.Db,
+	}
 }
 
 func NewBaseService() *Service {
